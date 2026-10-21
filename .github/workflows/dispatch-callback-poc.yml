@@ -14,7 +14,7 @@ env:
 jobs:
   dispatch-callback-poc:
     name: External dispatch and callback contract POC
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-l24.04
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -35,8 +35,9 @@ jobs:
             -e CALLBACK_SECRET \
             -e CALLBACK_OUTPUT=/callback/callback-results.jsonl \
             -v "$RUNNER_TEMP/callback:/callback" \
+            --entrypoint python3 \
             zero-clamav:dispatch-callback-poc \
-            python3 /usr/local/bin/callback_receiver.py
+            /usr/local/bin/callback_receiver.py
 
       - name: Validate callback receiver
         run: |
@@ -46,7 +47,8 @@ jobs:
             fi
             sleep 1
           done
-          docker logs callback-receiver
+          docker ps -a
+          docker logs callback-receiver || true
           exit 1
 
       - name: Run manual two-result callback contract test
