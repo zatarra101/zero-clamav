@@ -44,7 +44,7 @@ jobs:
           test -n "$R2_BUCKET" || { echo 'Missing R2_BUCKET repository secret'; exit 1; }
 
           ATTACHMENT_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
-          STORAGE_KEY="helpdesk/poc-quarantine/${ATTACHMENT_ID}/repository-dispatch-sample.bin"
+          STORAGE_KEY="helpdesk/poc-quarantine/${ATTACHMENT_ID}/repository-dispatch-sample.pdf"
 
           if [ "$EXPECTED_RESULT" = "clean" ]; then
             DATA='%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n'
@@ -89,21 +89,7 @@ jobs:
         run: |
           for i in $(seq 1 30); do
             RUN_JSON="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow dispatch-callback-poc.yml --event repository_dispatch --limit 10 --json databaseId,status,conclusion,createdAt)"
-            RUN_INFO="$(RUN_JSON="$RUN_JSON" python3 - "$DISPATCH_SENT_AT" <<'PY'
-import json
-import os
-import sys
-from datetime import datetime
-
-rows = json.loads(os.environ["RUN_JSON"])
-sent = int(sys.argv[1])
-for row in rows:
-    created = datetime.fromisoformat(row["createdAt"].replace("Z", "+00:00")).timestamp()
-    if created >= sent:
-        print(row["databaseId"], row["status"], row.get("conclusion") or "")
-        break
-PY
-)"
+            RUN_INFO="$(printf '%s' "$RUN_JSON" | jq -r --argjson sent "$DISPATCH_SENT_AT" 'map(select((.createdAt | fromdateiso8601) >= $sent)) | first | if . == null then empty else [.databaseId, .status, (.conclusion // "")] | @tsv end')"
             if [ -n "$RUN_INFO" ]; then
               read -r RUN_ID STATUS CONCLUSION <<< "$RUN_INFO"
               echo "Target run=$RUN_ID status=$STATUS conclusion=$CONCLUSION"
