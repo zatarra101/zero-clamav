@@ -1,0 +1,159 @@
+name: Dispatch and Callback POC
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [scan_request]
+
+permissions:
+  contents: read
+
+env:
+  DOCKER_BUILD_RECORD_UPLOAD: false
+
+jobs:
+  dispatch-callback-poc:
+    name: External dispatch and callback contract POC
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build dispatch callback image
+        run: docker build --pull -f Dockerfile.dispatch-callback-poc -t zero-clamav:dispatch-callback-poc .
+
+      - name: Start isolated callback receiver
+        env:
+          CALLBACK_SECRET: poc-callback-secret
+        run: |
+          mkdir -p "$RUNNER_TEMP/callback"
+          docker network create zero-clamav-poc
+          docker run -d --rm \
+            --name callback-receiver \
+            --network zero-clamav-poc \
+            -e CALLBACK_SECRET \
+            -e CALLBACK_OUTPUT=/callback/callback-results.jsonl \
+            -v "$RUNNER_TEMP/callback:/callback" \
+            zero-clamav:dispatch-callback-poc \
+            python3 /usr/local/bin/callback_receiver.py
+
+      - name: Validate callback receiver
+        run: |
+          for i in $(seq 1 20); do
+            if docker exec callback-receiver python3 -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8787/not-found")' 2>/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs callback-receiver
+          exit 1
+
+      - name: Run manual two-result callback contract test
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          test -n "$R2_ENDPOINT" || { echo 'Missing R2_ENDPOINT repository secret'; exit 1; }
+          test -n "$R2_ACCESS_KEY_ID" || { echo 'Missing R2_ACCESS_KEY_ID repository secret'; exit 1; }
+          test -n "$R2_SECRET_ACCESS_KEY" || { echo 'Missing R2_SECRET_ACCESS_KEY repository secret'; exit 1; }
+          test -n "$R2_BUCKET" || { echo 'Missing R2_BUCKET repository secret'; exit 1; }
+
+          run_case() {
+            local result="$1"
+            local attachment_id
+            attachment_id="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+            local storage_key="helpdesk/poc-quarantine/${attachment_id}/sample.bin"
+            local data
+            if [ "$result" = "clean" ]; then
+              data='%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n'
+            else
+              data="$(printf 'X5O!P%%@AP[4\\PZX54(P^)7CC)7}$$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$$H+H*')"
+            fi
+
+            docker run --rm \
+              --network zero-clamav-poc \
+              --entrypoint python3 \
+              -e R2_ENDPOINT \
+              -e R2_ACCESS_KEY_ID \
+              -e R2_SECRET_ACCESS_KEY \
+              -e R2_BUCKET \
+              -e STORAGE_KEY="$storage_key" \
+              -e DATA="$data" \
+              zero-clamav:dispatch-callback-poc \
+              -c 'import os,boto3; from botocore.config import Config; s=boto3.client("s3",endpoint_url=os.environ["R2_ENDPOINT"],aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],region_name="auto",config=Config(signature_version="s3v4")); s.put_object(Bucket=os.environ["R2_BUCKET"],Key=os.environ["STORAGE_KEY"],Body=os.environ["DATA"].encode("ascii"))'
+
+            docker run --rm \
+              --network zero-clamav-poc \
+              -e R2_ENDPOINT \
+              -e R2_ACCESS_KEY_ID \
+              -e R2_SECRET_ACCESS_KEY \
+              -e R2_BUCKET \
+              -e ATTACHMENT_ID="$attachment_id" \
+              -e STORAGE_KEY="$storage_key" \
+              -e EXPECTED_RESULT="$result" \
+              -e CALLBACK_URL=http://callback-receiver:8787/callback \
+              -e CALLBACK_SECRET=poc-callback-secret \
+              zero-clamav:dispatch-callback-poc
+          }
+
+          run_case clean
+          run_case infected
+
+      - name: Run repository_dispatch payload contract test
+        if: github.event_name == 'repository_dispatch'
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          ATTACHMENT_ID: ${{ github.event.client_payload.attachment_id }}
+          STORAGE_KEY: ${{ github.event.client_payload.storage_key }}
+          EXPECTED_RESULT: ${{ github.event.client_payload.expected_result }}
+        run: |
+          test -n "$ATTACHMENT_ID" || { echo 'Missing client_payload.attachment_id'; exit 1; }
+          test -n "$STORAGE_KEY" || { echo 'Missing client_payload.storage_key'; exit 1; }
+          test -n "$EXPECTED_RESULT" || { echo 'Missing client_payload.expected_result'; exit 1; }
+          test "$EXPECTED_RESULT" = clean || test "$EXPECTED_RESULT" = infected || { echo 'expected_result must be clean or infected'; exit 1; }
+
+          docker run --rm \
+            --network zero-clamav-poc \
+            -e R2_ENDPOINT \
+            -e R2_ACCESS_KEY_ID \
+            -e R2_SECRET_ACCESS_KEY \
+            -e R2_BUCKET \
+            -e ATTACHMENT_ID \
+            -e STORAGE_KEY \
+            -e EXPECTED_RESULT \
+            -e CALLBACK_URL=http://callback-receiver:8787/callback \
+            -e CALLBACK_SECRET=poc-callback-secret \
+            zero-clamav:dispatch-callback-poc
+
+      - name: Verify callback records
+        run: |
+          test -f "$RUNNER_TEMP/callback/callback-results.jsonl"
+          cat "$RUNNER_TEMP/callback/callback-results.jsonl"
+          python3 - "$RUNNER_TEMP/callback/callback-results.jsonl" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          rows = [json.loads(line) for line in Path(sys.argv[1]).read_text().splitlines() if line.strip()]
+          assert rows, "No callback was received"
+          for row in rows:
+              assert row["scan_result"] in {"clean", "infected"}
+              assert row["scanner"] == "zero-clamav"
+              assert row["attachment_id"]
+              assert row["storage_key"].startswith("helpdesk/poc-quarantine/")
+          if len(rows) >= 2:
+              assert {row["scan_result"] for row in rows} >= {"clean", "infected"}
+          print(f"CALLBACK_RECORDS={len(rows)}")
+          print("DISPATCH_CALLBACK_POC_RESULT=PASS")
+          PY
+
+      - name: Cleanup
+        if: always()
+        run: docker network rm zero-clamav-poc 2>/dev/null || true
