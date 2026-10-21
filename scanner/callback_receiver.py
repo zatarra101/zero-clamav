@@ -13,6 +13,15 @@ if not SECRET:
 
 
 class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/healthz":
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+            return
+        self.send_response(404)
+        self.end_headers()
+
     def do_POST(self):
         if self.path != "/callback":
             self.send_response(404)
@@ -52,4 +61,4 @@ class Handler(BaseHTTPRequestHandler):
         return
 
 
-HTTPServer(("127.0.0.1", 8787), Handler).serve_forever()
+HTTPServer(("0.0.0.0", 8787), Handler).serve_forever()
