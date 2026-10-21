@@ -1,0 +1,11 @@
+FROM clamav/clamav:1.4-debian13-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 python3-pip ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m pip install --no-cache-dir --break-system-packages boto3
+
+COPY scanner/production_scan.py /usr/local/bin/production_scan.py
+RUN chmod +x /usr/local/bin/production_scan.py
+
+ENTRYPOINT ["python3", "/usr/local/bin/production_scan.py"]
