@@ -89,12 +89,13 @@ jobs:
         run: |
           for i in $(seq 1 30); do
             RUN_JSON="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow dispatch-callback-poc.yml --event repository_dispatch --limit 10 --json databaseId,status,conclusion,createdAt)"
-            RUN_INFO="$(python3 - "$DISPATCH_SENT_AT" <<'PY' <<< "$RUN_JSON"
+            RUN_INFO="$(RUN_JSON="$RUN_JSON" python3 - "$DISPATCH_SENT_AT" <<'PY'
 import json
+import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 
-rows = json.load(sys.stdin)
+rows = json.loads(os.environ["RUN_JSON"])
 sent = int(sys.argv[1])
 for row in rows:
     created = datetime.fromisoformat(row["createdAt"].replace("Z", "+00:00")).timestamp()
