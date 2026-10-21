@@ -1,0 +1,25 @@
+name: Zero ClamAV POC
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOCKER_BUILD_RECORD_UPLOAD: false
+
+jobs:
+  clamav-poc:
+    name: ClamAV isolated runtime test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build POC image
+        run: docker build --pull -t zero-clamav:poc .
+
+      - name: Run clean-file and EICAR tests
+        run: docker run --rm zero-clamav:poc
