@@ -73,7 +73,8 @@ jobs:
             if [ "$result" = "clean" ]; then
               data='%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n'
             else
-              data="$(printf 'X5O!P%%@AP[4\\PZX54(P^)7CC)7}$$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$$H+H*')"
+              # Keep the AV test string literal so the shell cannot expand the $ characters.
+              data='X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*'
             fi
 
             docker run --rm \
