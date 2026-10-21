@@ -53,6 +53,7 @@ jobs:
           fi
 
           docker run --rm \
+            --entrypoint python3 \
             -e R2_ENDPOINT \
             -e R2_ACCESS_KEY_ID \
             -e R2_SECRET_ACCESS_KEY \
