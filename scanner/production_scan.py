@@ -96,8 +96,21 @@ def scan() -> None:
             if int(head(safe_key).get("ContentLength", -1)) != size:
                 raise RuntimeError("Safe copy size verification failed")
 
+        payload = {
+            "attachment_id": attachment_id,
+            "previous_storage_key": storage_key,
+            "safe_storage_key": safe_key,
+            "scan_result": scan_result,
+            "scanner": "zero-clamav",
+            "scanner_version": "production-contract-1",
+            "scan_error": None,
+            "sha256": digest,
+        }
+
+        # Finalize the DB state first. If callback delivery fails, quarantine remains
+        # available for retry instead of becoming an orphaned pending attachment.
+        send_callback(payload)
         delete(storage_key)
-        send_callback({"attachment_id": attachment_id, "previous_storage_key": storage_key, "safe_storage_key": safe_key, "scan_result": scan_result, "scanner": "zero-clamav", "scanner_version": "production-contract-1", "scan_error": None, "sha256": digest})
         print(f"PRODUCTION_CONTRACT_RESULT=PASS result={scan_result} size={size} sha256={digest}")
 
 
