@@ -1,0 +1,161 @@
+name: Production Contract POC
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [helpdesk_scan_request]
+
+permissions:
+  contents: read
+
+env:
+  DOCKER_BUILD_RECORD_UPLOAD: false
+
+jobs:
+  production-contract:
+    name: Production-shaped Help Desk scan contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build production contract image
+        run: docker build --pull -f Dockerfile.production-contract -t zero-clamav:production-contract .
+
+      - name: Start isolated production callback receiver
+        env:
+          CALLBACK_SECRET: production-contract-secret
+        run: |
+          mkdir -p "$RUNNER_TEMP/production-callback"
+          docker network create zero-clamav-production
+          docker run -d --rm \
+            --name production-callback-receiver \
+            --network zero-clamav-production \
+            -e CALLBACK_SECRET \
+            -e CALLBACK_OUTPUT=/callback/results.jsonl \
+            -v "$RUNNER_TEMP/production-callback:/callback" \
+            --entrypoint python3 \
+            zero-clamav:production-contract \
+            -c 'exec(open("/usr/local/bin/production_callback_receiver.py").read())'
+
+      - name: Validate production callback receiver
+        run: |
+          for i in $(seq 1 20); do
+            if docker exec production-callback-receiver python3 -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8787/healthz")' 2>/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker ps -a
+          docker logs production-callback-receiver || true
+          exit 1
+
+      - name: Run clean and infected production contract cases
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          test -n "$R2_ENDPOINT" || { echo 'Missing R2_ENDPOINT repository secret'; exit 1; }
+          test -n "$R2_ACCESS_KEY_ID" || { echo 'Missing R2_ACCESS_KEY_ID repository secret'; exit 1; }
+          test -n "$R2_SECRET_ACCESS_KEY" || { echo 'Missing R2_SECRET_ACCESS_KEY repository secret'; exit 1; }
+          test -n "$R2_BUCKET" || { echo 'Missing R2_BUCKET repository secret'; exit 1; }
+
+          run_case() {
+            local result="$1"
+            local attachment_id
+            attachment_id="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+            local storage_key="helpdesk/quarantine/${attachment_id}/production-contract-sample.pdf"
+            local data
+            if [ "$result" = "clean" ]; then
+              data='%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n'
+            else
+              data='X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*'
+            fi
+
+            docker run --rm \
+              --entrypoint python3 \
+              -e R2_ENDPOINT \
+              -e R2_ACCESS_KEY_ID \
+              -e R2_SECRET_ACCESS_KEY \
+              -e R2_BUCKET \
+              -e STORAGE_KEY="$storage_key" \
+              -e DATA="$data" \
+              zero-clamav:production-contract \
+              -c 'import os,boto3; from botocore.config import Config; s=boto3.client("s3",endpoint_url=os.environ["R2_ENDPOINT"],aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],region_name="auto",config=Config(signature_version="s3v4")); s.put_object(Bucket=os.environ["R2_BUCKET"],Key=os.environ["STORAGE_KEY"],Body=os.environ["DATA"].encode("ascii"))'
+
+            docker run --rm \
+              --network zero-clamav-production \
+              -e R2_ENDPOINT \
+              -e R2_ACCESS_KEY_ID \
+              -e R2_SECRET_ACCESS_KEY \
+              -e R2_BUCKET \
+              -e ATTACHMENT_ID="$attachment_id" \
+              -e STORAGE_KEY="$storage_key" \
+              -e CALLBACK_URL=http://production-callback-receiver:8787/callback \
+              -e CALLBACK_SECRET=production-contract-secret \
+              zero-clamav:production-contract
+          }
+
+          run_case clean
+          run_case infected
+
+      - name: Run repository_dispatch production payload case
+        if: github.event_name == 'repository_dispatch'
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          ATTACHMENT_ID: ${{ github.event.client_payload.attachment_id }}
+          STORAGE_KEY: ${{ github.event.client_payload.storage_key }}
+        run: |
+          test -n "$ATTACHMENT_ID" || { echo 'Missing client_payload.attachment_id'; exit 1; }
+          test -n "$STORAGE_KEY" || { echo 'Missing client_payload.storage_key'; exit 1; }
+          docker run --rm \
+            --network zero-clamav-production \
+            -e R2_ENDPOINT \
+            -e R2_ACCESS_KEY_ID \
+            -e R2_SECRET_ACCESS_KEY \
+            -e R2_BUCKET \
+            -e ATTACHMENT_ID \
+            -e STORAGE_KEY \
+            -e CALLBACK_URL=http://production-callback-receiver:8787/callback \
+            -e CALLBACK_SECRET=production-contract-secret \
+            zero-clamav:production-contract
+
+      - name: Verify production callback records
+        run: |
+          test -f "$RUNNER_TEMP/production-callback/results.jsonl"
+          cat "$RUNNER_TEMP/production-callback/results.jsonl"
+          python3 - "$RUNNER_TEMP/production-callback/results.jsonl" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          rows = [json.loads(line) for line in Path(sys.argv[1]).read_text().splitlines() if line.strip()]
+          assert rows, "No production-shaped callback was received"
+          for row in rows:
+              assert row["attachment_id"]
+              assert row["previous_storage_key"].startswith("helpdesk/quarantine/")
+              assert row["scanner"] == "zero-clamav"
+              assert row["scanner_version"] == "production-contract-1"
+              assert row["scan_result"] in {"clean", "infected", "error"}
+              assert len(row["sha256"]) == 64
+              if row["scan_result"] == "clean":
+                  assert row["safe_storage_key"].startswith("helpdesk/safe/")
+                  assert row["scan_error"] is None
+              else:
+                  assert row["safe_storage_key"] is None
+          if len(rows) >= 2:
+              assert {row["scan_result"] for row in rows} >= {"clean", "infected"}
+          print(f"PRODUCTION_CALLBACK_RECORDS={len(rows)}")
+          print("PRODUCTION_CONTRACT_POC_RESULT=PASS")
+          PY
+
+      - name: Cleanup
+        if: always()
+        run: docker network rm zero-clamav-production 2>/dev/null || true
