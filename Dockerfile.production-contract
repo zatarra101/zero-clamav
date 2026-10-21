@@ -6,6 +6,7 @@ RUN apt-get update \
     && python3 -m pip install --no-cache-dir --break-system-packages boto3
 
 COPY scanner/production_scan.py /usr/local/bin/production_scan.py
-RUN chmod +x /usr/local/bin/production_scan.py
+COPY scanner/production_callback_receiver.py /usr/local/bin/production_callback_receiver.py
+RUN chmod +x /usr/local/bin/production_scan.py /usr/local/bin/production_callback_receiver.py
 
 ENTRYPOINT ["python3", "/usr/local/bin/production_scan.py"]
