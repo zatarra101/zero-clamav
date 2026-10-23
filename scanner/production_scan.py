@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import tempfile
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -62,9 +63,18 @@ def sha256_file(path: Path) -> str:
 def send_callback(payload: dict) -> None:
     body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     request = urllib.request.Request(callback_url, data=body, method="POST", headers={"Content-Type": "application/json", "x-helpdesk-scan-secret": callback_secret})
-    with urllib.request.urlopen(request, timeout=15) as response:
-        if response.status != 200:
-            raise RuntimeError(f"Callback returned HTTP {response.status}")
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            if response.status != 200:
+                raise RuntimeError(f"Callback returned HTTP {response.status}")
+    except urllib.error.HTTPError as error:
+        # The callback RPC is intentionally idempotent. A 409 means another
+        # attempt already finalized this attachment; treat that as success so
+        # the quarantine object can still be cleaned up.
+        if error.code == 409:
+            print("Callback returned 409; attachment was already finalized")
+            return
+        raise
 
 
 def scan() -> None:
@@ -102,7 +112,7 @@ def scan() -> None:
             "safe_storage_key": safe_key,
             "scan_result": scan_result,
             "scanner": "zero-clamav",
-            "scanner_version": "production-contract-1",
+            "scanner_version": "production-contract-2",
             "scan_error": None,
             "sha256": digest,
         }
