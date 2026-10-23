@@ -16,6 +16,7 @@ MAX_BYTES = 10 * 1024 * 1024
 QUARANTINE_ROOT = "helpdesk/quarantine/"
 SAFE_ROOT = "helpdesk/safe/"
 KEY_RE = re.compile(r"^helpdesk/quarantine/[0-9a-f-]{36}/[A-Za-z0-9._-]+$")
+STAFF_KEY_RE = re.compile(r"^helpdesk/quarantine/staff/[0-9a-f-]{36}/[0-9a-f-]{36}\.[A-Za-z0-9]+$")
 
 
 def required(name: str) -> str:
@@ -36,10 +37,18 @@ callback_secret = required("CALLBACK_SECRET")
 
 if not re.fullmatch(r"[0-9a-f-]{36}", attachment_id):
     raise SystemExit("ATTACHMENT_ID must be a UUID")
-if not KEY_RE.fullmatch(storage_key):
+
+if KEY_RE.fullmatch(storage_key):
+    if not storage_key.startswith(f"{QUARANTINE_ROOT}{attachment_id}/"):
+        raise SystemExit("STORAGE_KEY attachment path does not match ATTACHMENT_ID")
+elif STAFF_KEY_RE.fullmatch(storage_key):
+    # Legacy staff uploads use helpdesk/quarantine/staff/<staff-user>/<attachment-id>.<ext>.
+    # Bind the attachment ID to the filename so this compatibility path cannot
+    # be reused for a different attachment.
+    if Path(storage_key).stem != attachment_id:
+        raise SystemExit("STORAGE_KEY staff attachment filename does not match ATTACHMENT_ID")
+else:
     raise SystemExit(f"Refusing storage key outside production quarantine contract: {storage_key}")
-if not storage_key.startswith(f"{QUARANTINE_ROOT}{attachment_id}/"):
-    raise SystemExit("STORAGE_KEY attachment path does not match ATTACHMENT_ID")
 
 s3 = boto3.client("s3", endpoint_url=endpoint, aws_access_key_id=access_key, aws_secret_access_key=secret_key, region_name="auto", config=Config(signature_version="s3v4"))
 
@@ -68,9 +77,6 @@ def send_callback(payload: dict) -> None:
             if response.status != 200:
                 raise RuntimeError(f"Callback returned HTTP {response.status}")
     except urllib.error.HTTPError as error:
-        # The callback RPC is intentionally idempotent. A 409 means another
-        # attempt already finalized this attachment; treat that as success so
-        # the quarantine object can still be cleaned up.
         if error.code == 409:
             print("Callback returned 409; attachment was already finalized")
             return
@@ -112,13 +118,11 @@ def scan() -> None:
             "safe_storage_key": safe_key,
             "scan_result": scan_result,
             "scanner": "zero-clamav",
-            "scanner_version": "production-contract-2",
+            "scanner_version": "production-contract-3",
             "scan_error": None,
             "sha256": digest,
         }
 
-        # Finalize the DB state first. If callback delivery fails, quarantine remains
-        # available for retry instead of becoming an orphaned pending attachment.
         send_callback(payload)
         delete(storage_key)
         print(f"PRODUCTION_CONTRACT_RESULT=PASS result={scan_result} size={size} sha256={digest}")
