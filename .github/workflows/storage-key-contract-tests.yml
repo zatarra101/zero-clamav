@@ -1,0 +1,37 @@
+name: Storage Key Contract Tests
+
+on:
+  push:
+    branches:
+      - fix/helpdesk-scan-key-contract-preview
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract-tests:
+    name: Validate Help Desk quarantine key contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run unit tests
+        run: python3 -m unittest scanner.test_storage_key_contract
+
+      - name: Compile scanner and validator
+        run: python3 -m py_compile scanner/storage_key_contract.py scanner/test_storage_key_contract.py scanner/production_scan.py
+
+      - name: Check live student UUID-filename contract
+        run: |
+          python3 scanner/storage_key_contract.py \
+            6876c442-b427-4907-95b9-1e0618c8a3c5 \
+            helpdesk/quarantine/6876c442-b427-4907-95b9-1e0618c8a3c5/13e59b5e-e61e-470f-82c3-107e961bf9b8.jpg
+
+      - name: Check legacy admin upload contract
+        run: |
+          python3 scanner/storage_key_contract.py \
+            c06716e1-4bd8-40a3-adb5-471570474bc8 \
+            helpdesk/quarantine/1c6ac29c-9998-496a-84b1-dbf168ef01c8/c06716e1-4bd8-40a3-adb5-471570474bc8.pdf
