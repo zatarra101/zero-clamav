@@ -61,7 +61,7 @@ jobs:
             -e MINIO_ROOT_USER=minioadmin \
             -e MINIO_ROOT_PASSWORD=minioadmin \
             -e MINIO_DOMAIN=minio \
-            minio/minio:RELEASE.2025-04-22T22-12-26Z \
+            cgr.dev/chainguard/minio:latest \
             server /data --console-address :9001
 
           docker run --rm --network zero-clamav-contract \
