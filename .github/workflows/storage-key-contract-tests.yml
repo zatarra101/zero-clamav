@@ -35,3 +35,17 @@ jobs:
           python3 scanner/storage_key_contract.py \
             c06716e1-4bd8-40a3-adb5-471570474bc8 \
             helpdesk/quarantine/1c6ac29c-9998-496a-84b1-dbf168ef01c8/c06716e1-4bd8-40a3-adb5-471570474bc8.pdf
+
+      - name: Build the exact scanner image
+        run: docker build --pull -f Dockerfile.production-contract -t zero-clamav:key-contract-test .
+
+      - name: Verify contracts inside scanner image
+        run: |
+          docker run --rm --entrypoint python3 zero-clamav:key-contract-test \
+            /usr/local/bin/storage_key_contract.py \
+            6876c442-b427-4907-95b9-1e0618c8a3c5 \
+            helpdesk/quarantine/6876c442-b427-4907-95b9-1e0618c8a3c5/13e59b5e-e61e-470f-82c3-107e961bf9b8.jpg
+          docker run --rm --entrypoint python3 zero-clamav:key-contract-test \
+            /usr/local/bin/storage_key_contract.py \
+            c06716e1-4bd8-40a3-adb5-471570474bc8 \
+            helpdesk/quarantine/1c6ac29c-9998-496a-84b1-dbf168ef01c8/c06716e1-4bd8-40a3-adb5-471570474bc8.pdf
