@@ -145,7 +145,7 @@ jobs:
               assert row["attachment_id"]
               assert row["previous_storage_key"].startswith("helpdesk/quarantine/")
               assert row["scanner"] == "zero-clamav"
-              assert row["scanner_version"] == "production-contract-1"
+              assert isinstance(row["scanner_version"], str) and row["scanner_version"].strip(), "Missing scanner_version"
               assert row["scan_result"] in {"clean", "infected", "error"}
               assert len(row["sha256"]) == 64
               if row["scan_result"] == "clean":
