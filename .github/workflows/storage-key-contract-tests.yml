@@ -13,7 +13,7 @@ jobs:
   contract-tests:
     name: Validate Help Desk quarantine key contracts
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -49,3 +49,182 @@ jobs:
             /usr/local/bin/storage_key_contract.py \
             c06716e1-4bd8-40a3-adb5-471570474bc8 \
             helpdesk/quarantine/1c6ac29c-9998-496a-84b1-dbf168ef01c8/c06716e1-4bd8-40a3-adb5-471570474bc8.pdf
+
+      - name: Start isolated MinIO test bucket
+        run: |
+          docker network create zero-clamav-contract
+          docker run -d --rm \
+            --name zero-clamav-minio \
+            --network zero-clamav-contract \
+            --network-alias minio \
+            --network-alias runtime-test-bucket.minio \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            -e MINIO_DOMAIN=minio \
+            minio/minio:RELEASE.2025-04-22T22-12-26Z \
+            server /data --console-address :9001
+
+          docker run --rm --network zero-clamav-contract \
+            --entrypoint python3 zero-clamav:key-contract-test -c '
+          import time, urllib.request
+          for attempt in range(60):
+              try:
+                  urllib.request.urlopen("http://minio:9000/minio/health/live", timeout=2).read()
+                  break
+              except Exception:
+                  if attempt == 59:
+                      raise
+                  time.sleep(1)
+          '
+
+      - name: Start isolated callback receiver
+        run: |
+          mkdir -p "$RUNNER_TEMP/zero-clamav-callback"
+          docker run -d --rm \
+            --name zero-clamav-callback \
+            --network zero-clamav-contract \
+            -e CALLBACK_SECRET=zero-clamav-contract-secret \
+            -e CALLBACK_OUTPUT=/callback/results.jsonl \
+            -v "$RUNNER_TEMP/zero-clamav-callback:/callback" \
+            --entrypoint python3 \
+            zero-clamav:key-contract-test \
+            -c 'exec(open("/usr/local/bin/production_callback_receiver.py").read())'
+
+          docker run --rm --network zero-clamav-contract \
+            --entrypoint python3 zero-clamav:key-contract-test -c '
+          import time, urllib.request
+          for attempt in range(30):
+              try:
+                  urllib.request.urlopen("http://zero-clamav-callback:8787/healthz", timeout=2).read()
+                  break
+              except Exception:
+                  if attempt == 29:
+                      raise
+                  time.sleep(1)
+          '
+
+      - name: Create isolated student and staff fixtures
+        env:
+          R2_ENDPOINT: http://minio:9000
+          R2_ACCESS_KEY_ID: minioadmin
+          R2_SECRET_ACCESS_KEY: minioadmin
+          R2_BUCKET: runtime-test-bucket
+        run: |
+          docker run --rm --network zero-clamav-contract \
+            -e R2_ENDPOINT -e R2_ACCESS_KEY_ID -e R2_SECRET_ACCESS_KEY -e R2_BUCKET \
+            --entrypoint python3 zero-clamav:key-contract-test -c '
+          import os, boto3
+          from botocore.config import Config
+          s=boto3.client("s3", endpoint_url=os.environ["R2_ENDPOINT"],
+              aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
+              aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+              region_name="us-east-1",
+              config=Config(signature_version="s3v4", s3={"addressing_style":"path"}))
+          bucket=os.environ["R2_BUCKET"]
+          s.create_bucket(Bucket=bucket)
+          student_id="6876c442-b427-4907-95b9-1e0618c8a3c5"
+          student_key="helpdesk/quarantine/"+student_id+"/13e59b5e-e61e-470f-82c3-107e961bf9b8.jpg"
+          staff_id="c06716e1-4bd8-40a3-adb5-471570474bc8"
+          staff_key="helpdesk/quarantine/1c6ac29c-9998-496a-84b1-dbf168ef01c8/"+staff_id+".pdf"
+          clean=b"Zero ClamAV isolated contract fixture.\n"
+          infected=b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+          s.put_object(Bucket=bucket, Key=student_key, Body=clean)
+          s.put_object(Bucket=bucket, Key=staff_key, Body=infected)
+          print("ISOLATED_FIXTURES_CREATED=2")
+          '
+
+      - name: Run actual scanner against the isolated student fixture
+        env:
+          R2_ENDPOINT: http://minio:9000
+          R2_ACCESS_KEY_ID: minioadmin
+          R2_SECRET_ACCESS_KEY: minioadmin
+          R2_BUCKET: runtime-test-bucket
+          ATTACHMENT_ID: 6876c442-b427-4907-95b9-1e0618c8a3c5
+          STORAGE_KEY: helpdesk/quarantine/6876c442-b427-4907-95b9-1e0618c8a3c5/13e59b5e-e61e-470f-82c3-107e961bf9b8.jpg
+          CALLBACK_URL: http://zero-clamav-callback:8787/callback
+          CALLBACK_SECRET: zero-clamav-contract-secret
+        run: |
+          docker run --rm --network zero-clamav-contract \
+            -e R2_ENDPOINT -e R2_ACCESS_KEY_ID -e R2_SECRET_ACCESS_KEY -e R2_BUCKET \
+            -e ATTACHMENT_ID -e STORAGE_KEY -e CALLBACK_URL -e CALLBACK_SECRET \
+            zero-clamav:key-contract-test
+
+      - name: Run actual scanner against the isolated legacy admin fixture
+        env:
+          R2_ENDPOINT: http://minio:9000
+          R2_ACCESS_KEY_ID: minioadmin
+          R2_SECRET_ACCESS_KEY: minioadmin
+          R2_BUCKET: runtime-test-bucket
+          ATTACHMENT_ID: c06716e1-4bd8-40a3-adb5-471570474bc8
+          STORAGE_KEY: helpdesk/quarantine/1c6ac29c-9998-496a-84b1-dbf168ef01c8/c06716e1-4bd8-40a3-adb5-471570474bc8.pdf
+          CALLBACK_URL: http://zero-clamav-callback:8787/callback
+          CALLBACK_SECRET: zero-clamav-contract-secret
+        run: |
+          docker run --rm --network zero-clamav-contract \
+            -e R2_ENDPOINT -e R2_ACCESS_KEY_ID -e R2_SECRET_ACCESS_KEY -e R2_BUCKET \
+            -e ATTACHMENT_ID -e STORAGE_KEY -e CALLBACK_URL -e CALLBACK_SECRET \
+            zero-clamav:key-contract-test
+
+      - name: Verify clean, infected and callback outcomes
+        run: |
+          test -f "$RUNNER_TEMP/zero-clamav-callback/results.jsonl"
+          python3 - "$RUNNER_TEMP/zero-clamav-callback/results.jsonl" <<'PY'
+          import json, sys, boto3
+          from pathlib import Path
+          from botocore.config import Config
+
+          rows=[json.loads(line) for line in Path(sys.argv[1]).read_text().splitlines() if line.strip()]
+          assert len(rows)==2, f"Expected 2 callbacks, got {len(rows)}"
+          assert {row["scan_result"] for row in rows} == {"clean", "infected"}
+          for row in rows:
+              assert row["scanner"] == "zero-clamav"
+              assert row["scanner_version"], "Missing scanner version"
+              assert len(row["sha256"]) == 64
+              assert row["scan_error"] is None
+              if row["scan_result"]=="clean":
+                  assert row["safe_storage_key"].startswith("helpdesk/safe/")
+              else:
+                  assert row["safe_storage_key"] is None
+
+          s=boto3.client("s3", endpoint_url="http://127.0.0.1:9",
+              aws_access_key_id="unused", aws_secret_access_key="unused",
+              config=Config(signature_version="s3v4"))
+          # The actual S3 object assertions run from inside the test network below.
+          print("ISOLATED_SCAN_CALLBACKS=2")
+          print("ISOLATED_SCAN_RESULTS=clean,infected")
+          print("ISOLATED_SCAN_CALLBACK_CONTRACT=PASS")
+          PY
+          docker run --rm --network zero-clamav-contract \
+            -e R2_ENDPOINT=http://minio:9000 \
+            -e R2_ACCESS_KEY_ID=minioadmin \
+            -e R2_SECRET_ACCESS_KEY=minioadmin \
+            -e R2_BUCKET=runtime-test-bucket \
+            --entrypoint python3 zero-clamav:key-contract-test -c '
+          import os, boto3
+          from botocore.config import Config
+          s=boto3.client("s3", endpoint_url=os.environ["R2_ENDPOINT"],
+              aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
+              aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+              region_name="us-east-1",
+              config=Config(signature_version="s3v4", s3={"addressing_style":"path"}))
+          bucket=os.environ["R2_BUCKET"]
+          s.head_object(Bucket=bucket, Key="helpdesk/safe/6876c442-b427-4907-95b9-1e0618c8a3c5/13e59b5e-e61e-470f-82c3-107e961bf9b8.jpg")
+          for key in (
+              "helpdesk/quarantine/6876c442-b427-4907-95b9-1e0618c8a3c5/13e59b5e-e61e-470f-82c3-107e961bf9b8.jpg",
+              "helpdesk/quarantine/1c6ac29c-9998-496a-84b1-dbf168ef01c8/c06716e1-4bd8-40a3-adb5-471570474bc8.pdf",
+              "helpdesk/safe/c06716e1-4bd8-40a3-b725-c15d0375895f/c06716e1-4bd8-40a3-b725-c15d0375895f.pdf",
+          ):
+              try:
+                  s.head_object(Bucket=bucket, Key=key)
+              except Exception:
+                  continue
+              else:
+                  raise SystemExit("Unexpected object remains: "+key)
+          print("ISOLATED_R2_OBJECT_DISPOSITION=PASS")
+          '
+
+      - name: Cleanup isolated scanner services
+        if: always()
+        run: |
+          docker stop zero-clamav-callback zero-clamav-minio 2>/dev/null || true
+          docker network rm zero-clamav-contract 2>/dev/null || true
