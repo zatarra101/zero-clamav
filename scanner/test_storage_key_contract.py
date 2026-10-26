@@ -17,6 +17,26 @@ class StorageKeyContractTests(unittest.TestCase):
         key = f"helpdesk/quarantine/{ATTACHMENT}/lecture.png"
         self.assertEqual(validate_storage_key(ATTACHMENT, key), "student")
 
+    def test_actual_pending_student_attachment_from_supabase(self):
+        attachment_id = "bc53ddf5-c0ea-42cb-85d6-627fc51fbf3a"
+        key = (
+            "helpdesk/quarantine/bc53ddf5-c0ea-42cb-85d6-627fc51fbf3a/"
+            "144bf826-9121-4b33-aecd-5e17cb2dcbe8.jpg"
+        )
+        self.assertEqual(validate_storage_key(attachment_id, key), "student")
+
+    def test_actual_failed_admin_attachment_from_github_run(self):
+        attachment_id = "a39eb38f-5ea0-4f4f-b07e-5af092207400"
+        key = (
+            "helpdesk/quarantine/1c6ac29c-9998-496a-84b1-dbf168ef01c8/"
+            "a39eb38f-5ea0-4f4f-b07e-5af092207400.pdf"
+        )
+        self.assertEqual(
+            validate_storage_key(attachment_id, key),
+            "legacy_user_scoped",
+        )
+
+
     def test_legacy_admin_upload(self):
         key = f"helpdesk/quarantine/{UPLOADER}/{ATTACHMENT}.pdf"
         self.assertEqual(validate_storage_key(ATTACHMENT, key), "legacy_user_scoped")
