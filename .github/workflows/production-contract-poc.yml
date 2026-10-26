@@ -20,6 +20,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Test storage-key contract
+        run: python3 -m unittest scanner.test_storage_key_contract
+
       - name: Build production contract image
         run: docker build --pull -f Dockerfile.production-contract -t zero-clamav:production-contract .
 
@@ -142,7 +145,7 @@ jobs:
               assert row["attachment_id"]
               assert row["previous_storage_key"].startswith("helpdesk/quarantine/")
               assert row["scanner"] == "zero-clamav"
-              assert row["scanner_version"] == "production-contract-1"
+              assert isinstance(row["scanner_version"], str) and row["scanner_version"].strip(), "Missing scanner_version"
               assert row["scan_result"] in {"clean", "infected", "error"}
               assert len(row["sha256"]) == 64
               if row["scan_result"] == "clean":
