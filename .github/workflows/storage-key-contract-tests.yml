@@ -24,6 +24,16 @@ jobs:
       - name: Compile scanner and validator
         run: python3 -m py_compile scanner/storage_key_contract.py scanner/test_storage_key_contract.py scanner/production_scan.py
 
+      - name: Verify callback test accepts the current scanner version
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          workflow = Path(".github/workflows/production-contract-poc.yml").read_text()
+          assert 'assert row["scanner_version"] == "production-contract-1"' not in workflow
+          assert 'assert isinstance(row["scanner_version"], str) and row["scanner_version"].strip()' in workflow
+          print("CALLBACK_SCANNER_VERSION_CONTRACT=PASS")
+          PY
+
       - name: Check live student UUID-filename contract
         run: |
           python3 scanner/storage_key_contract.py \
