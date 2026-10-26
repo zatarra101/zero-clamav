@@ -9,15 +9,13 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from storage_key_contract import validate_storage_key
+
 import boto3
 from botocore.config import Config
 
 MAX_BYTES = 10 * 1024 * 1024
-QUARANTINE_ROOT = "helpdesk/quarantine/"
 SAFE_ROOT = "helpdesk/safe/"
-KEY_RE = re.compile(r"^helpdesk/quarantine/[0-9a-f-]{36}/[A-Za-z0-9._-]+$")
-USER_SCOPED_KEY_RE = re.compile(r"^helpdesk/quarantine/[0-9a-f-]{36}/[0-9a-f-]{36}\.[A-Za-z0-9]+$")
-STAFF_KEY_RE = re.compile(r"^helpdesk/quarantine/staff/[0-9a-f-]{36}/[0-9a-f-]{36}\.[A-Za-z0-9]+$")
 
 
 def required(name: str) -> str:
@@ -39,17 +37,11 @@ callback_secret = required("CALLBACK_SECRET")
 if not re.fullmatch(r"[0-9a-f-]{36}", attachment_id):
     raise SystemExit("ATTACHMENT_ID must be a UUID")
 
-if KEY_RE.fullmatch(storage_key):
-    if not storage_key.startswith(f"{QUARANTINE_ROOT}{attachment_id}/"):
-        raise SystemExit("STORAGE_KEY attachment path does not match ATTACHMENT_ID")
-elif USER_SCOPED_KEY_RE.fullmatch(storage_key) or STAFF_KEY_RE.fullmatch(storage_key):
-    # Compatibility with older staff/admin uploads:
-    # helpdesk/quarantine/<uploader-user>/<attachment-id>.<ext>
-    # or helpdesk/quarantine/staff/<uploader-user>/<attachment-id>.<ext>.
-    if Path(storage_key).stem != attachment_id:
-        raise SystemExit("STORAGE_KEY compatibility filename does not match ATTACHMENT_ID")
-else:
-    raise SystemExit(f"Refusing storage key outside production quarantine contract: {storage_key}")
+try:
+    storage_key_kind = validate_storage_key(attachment_id, storage_key)
+except ValueError as error:
+    raise SystemExit(str(error))
+print(f"Validated quarantine storage-key contract: {storage_key_kind}")
 
 s3 = boto3.client("s3", endpoint_url=endpoint, aws_access_key_id=access_key, aws_secret_access_key=secret_key, region_name="auto", config=Config(signature_version="s3v4"))
 
