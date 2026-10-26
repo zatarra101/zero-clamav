@@ -27,14 +27,14 @@ jobs:
       - name: Check live student UUID-filename contract
         run: |
           python3 scanner/storage_key_contract.py \
-            6876c442-b427-4907-95b9-1e0618c8a3c5 \
-            helpdesk/quarantine/6876c442-b427-4907-95b9-1e0618c8a3c5/13e59b5e-e61e-470f-82c3-107e961bf9b8.jpg
+            bc53ddf5-c0ea-42cb-85d6-627fc51fbf3a \
+            helpdesk/quarantine/bc53ddf5-c0ea-42cb-85d6-627fc51fbf3a/144bf826-9121-4b33-aecd-5e17cb2dcbe8.jpg
 
       - name: Check legacy admin upload contract
         run: |
           python3 scanner/storage_key_contract.py \
-            c06716e1-4bd8-40a3-adb5-471570474bc8 \
-            helpdesk/quarantine/1c6ac29c-9998-496a-84b1-dbf168ef01c8/c06716e1-4bd8-40a3-adb5-471570474bc8.pdf
+            a39eb38f-5ea0-4f4f-b07e-5af092207400 \
+            helpdesk/quarantine/1c6ac29c-9998-496a-84b1-dbf168ef01c8/a39eb38f-5ea0-4f4f-b07e-5af092207400.pdf
 
       - name: Build the exact scanner image
         run: docker build --pull -f Dockerfile.production-contract -t zero-clamav:key-contract-test .
@@ -43,12 +43,12 @@ jobs:
         run: |
           docker run --rm --entrypoint python3 zero-clamav:key-contract-test \
             /usr/local/bin/storage_key_contract.py \
-            6876c442-b427-4907-95b9-1e0618c8a3c5 \
-            helpdesk/quarantine/6876c442-b427-4907-95b9-1e0618c8a3c5/13e59b5e-e61e-470f-82c3-107e961bf9b8.jpg
+            bc53ddf5-c0ea-42cb-85d6-627fc51fbf3a \
+            helpdesk/quarantine/bc53ddf5-c0ea-42cb-85d6-627fc51fbf3a/144bf826-9121-4b33-aecd-5e17cb2dcbe8.jpg
           docker run --rm --entrypoint python3 zero-clamav:key-contract-test \
             /usr/local/bin/storage_key_contract.py \
-            c06716e1-4bd8-40a3-adb5-471570474bc8 \
-            helpdesk/quarantine/1c6ac29c-9998-496a-84b1-dbf168ef01c8/c06716e1-4bd8-40a3-adb5-471570474bc8.pdf
+            a39eb38f-5ea0-4f4f-b07e-5af092207400 \
+            helpdesk/quarantine/1c6ac29c-9998-496a-84b1-dbf168ef01c8/a39eb38f-5ea0-4f4f-b07e-5af092207400.pdf
 
       - name: Start isolated MinIO test bucket
         run: |
@@ -122,9 +122,9 @@ jobs:
               config=Config(signature_version="s3v4", s3={"addressing_style":"path"}))
           bucket=os.environ["R2_BUCKET"]
           s.create_bucket(Bucket=bucket)
-          student_id="6876c442-b427-4907-95b9-1e0618c8a3c5"
-          student_key="helpdesk/quarantine/"+student_id+"/13e59b5e-e61e-470f-82c3-107e961bf9b8.jpg"
-          staff_id="c06716e1-4bd8-40a3-adb5-471570474bc8"
+          student_id="bc53ddf5-c0ea-42cb-85d6-627fc51fbf3a"
+          student_key="helpdesk/quarantine/"+student_id+"/144bf826-9121-4b33-aecd-5e17cb2dcbe8.jpg"
+          staff_id="a39eb38f-5ea0-4f4f-b07e-5af092207400"
           staff_key="helpdesk/quarantine/1c6ac29c-9998-496a-84b1-dbf168ef01c8/"+staff_id+".pdf"
           clean=b"Zero ClamAV isolated contract fixture.\n"
           infected=b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
@@ -139,8 +139,8 @@ jobs:
           R2_ACCESS_KEY_ID: minioadmin
           R2_SECRET_ACCESS_KEY: minioadmin
           R2_BUCKET: runtime-test-bucket
-          ATTACHMENT_ID: 6876c442-b427-4907-95b9-1e0618c8a3c5
-          STORAGE_KEY: helpdesk/quarantine/6876c442-b427-4907-95b9-1e0618c8a3c5/13e59b5e-e61e-470f-82c3-107e961bf9b8.jpg
+          ATTACHMENT_ID: bc53ddf5-c0ea-42cb-85d6-627fc51fbf3a
+          STORAGE_KEY: helpdesk/quarantine/bc53ddf5-c0ea-42cb-85d6-627fc51fbf3a/144bf826-9121-4b33-aecd-5e17cb2dcbe8.jpg
           CALLBACK_URL: http://zero-clamav-callback:8787/callback
           CALLBACK_SECRET: zero-clamav-contract-secret
         run: |
@@ -155,8 +155,8 @@ jobs:
           R2_ACCESS_KEY_ID: minioadmin
           R2_SECRET_ACCESS_KEY: minioadmin
           R2_BUCKET: runtime-test-bucket
-          ATTACHMENT_ID: c06716e1-4bd8-40a3-adb5-471570474bc8
-          STORAGE_KEY: helpdesk/quarantine/1c6ac29c-9998-496a-84b1-dbf168ef01c8/c06716e1-4bd8-40a3-adb5-471570474bc8.pdf
+          ATTACHMENT_ID: a39eb38f-5ea0-4f4f-b07e-5af092207400
+          STORAGE_KEY: helpdesk/quarantine/1c6ac29c-9998-496a-84b1-dbf168ef01c8/a39eb38f-5ea0-4f4f-b07e-5af092207400.pdf
           CALLBACK_URL: http://zero-clamav-callback:8787/callback
           CALLBACK_SECRET: zero-clamav-contract-secret
         run: |
@@ -203,12 +203,12 @@ jobs:
               region_name="us-east-1",
               config=Config(signature_version="s3v4", s3={"addressing_style":"path"}))
           bucket=os.environ["R2_BUCKET"]
-          s.head_object(Bucket=bucket, Key="helpdesk/safe/6876c442-b427-4907-95b9-1e0618c8a3c5/13e59b5e-e61e-470f-82c3-107e961bf9b8.jpg")
+          s.head_object(Bucket=bucket, Key="helpdesk/safe/bc53ddf5-c0ea-42cb-85d6-627fc51fbf3a/144bf826-9121-4b33-aecd-5e17cb2dcbe8.jpg")
           from botocore.exceptions import ClientError
           for key in (
-              "helpdesk/quarantine/6876c442-b427-4907-95b9-1e0618c8a3c5/13e59b5e-e61e-470f-82c3-107e961bf9b8.jpg",
-              "helpdesk/quarantine/1c6ac29c-9998-496a-84b1-dbf168ef01c8/c06716e1-4bd8-40a3-adb5-471570474bc8.pdf",
-              "helpdesk/safe/c06716e1-4bd8-40a3-adb5-471570474bc8/c06716e1-4bd8-40a3-adb5-471570474bc8.pdf",
+              "helpdesk/quarantine/bc53ddf5-c0ea-42cb-85d6-627fc51fbf3a/144bf826-9121-4b33-aecd-5e17cb2dcbe8.jpg",
+              "helpdesk/quarantine/1c6ac29c-9998-496a-84b1-dbf168ef01c8/a39eb38f-5ea0-4f4f-b07e-5af092207400.pdf",
+              "helpdesk/safe/a39eb38f-5ea0-4f4f-b07e-5af092207400/a39eb38f-5ea0-4f4f-b07e-5af092207400.pdf",
           ):
               try:
                   s.head_object(Bucket=bucket, Key=key)
