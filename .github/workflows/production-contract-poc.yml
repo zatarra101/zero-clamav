@@ -2,8 +2,6 @@ name: Production Contract POC
 
 on:
   workflow_dispatch:
-  repository_dispatch:
-    types: [helpdesk_scan_request]
 
 permissions:
   contents: read
@@ -105,30 +103,6 @@ jobs:
 
           run_case clean
           run_case infected
-
-      - name: Run repository_dispatch production payload case
-        if: github.event_name == 'repository_dispatch'
-        env:
-          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET: ${{ secrets.R2_BUCKET }}
-          ATTACHMENT_ID: ${{ github.event.client_payload.attachment_id }}
-          STORAGE_KEY: ${{ github.event.client_payload.storage_key }}
-        run: |
-          test -n "$ATTACHMENT_ID" || { echo 'Missing client_payload.attachment_id'; exit 1; }
-          test -n "$STORAGE_KEY" || { echo 'Missing client_payload.storage_key'; exit 1; }
-          docker run --rm \
-            --network zero-clamav-production \
-            -e R2_ENDPOINT \
-            -e R2_ACCESS_KEY_ID \
-            -e R2_SECRET_ACCESS_KEY \
-            -e R2_BUCKET \
-            -e ATTACHMENT_ID \
-            -e STORAGE_KEY \
-            -e CALLBACK_URL=http://production-callback-receiver:8787/callback \
-            -e CALLBACK_SECRET=production-contract-secret \
-            zero-clamav:production-contract
 
       - name: Verify production callback records
         run: |
