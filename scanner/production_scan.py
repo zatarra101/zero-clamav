@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -13,9 +14,12 @@ from storage_key_contract import validate_storage_key
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import ClientError
 
 MAX_BYTES = 10 * 1024 * 1024
 SAFE_ROOT = "helpdesk/safe/"
+HEAD_RETRIES = 6
+HEAD_DELAYS_SECONDS = (2, 4, 8, 12, 16)
 
 
 def required(name: str) -> str:
@@ -47,7 +51,23 @@ s3 = boto3.client("s3", endpoint_url=endpoint, aws_access_key_id=access_key, aws
 
 
 def head(key: str):
-    return s3.head_object(Bucket=bucket, Key=key)
+    """Read object metadata, tolerating a short-lived R2 visibility race."""
+    for attempt in range(1, HEAD_RETRIES + 1):
+        try:
+            meta = s3.head_object(Bucket=bucket, Key=key)
+            print(f"R2 object visible: bucket={bucket} key={key} attempt={attempt}")
+            return meta
+        except ClientError as error:
+            status = error.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            code = error.response.get("Error", {}).get("Code")
+            if status != 404 and code not in {"404", "NoSuchKey", "NotFound"}:
+                raise
+            print(f"R2 object not visible yet: bucket={bucket} key={key} attempt={attempt}/{HEAD_RETRIES}")
+            if attempt == HEAD_RETRIES:
+                raise RuntimeError(
+                    f"Quarantine object was not found after {HEAD_RETRIES} visibility checks: {key}"
+                ) from error
+            time.sleep(HEAD_DELAYS_SECONDS[attempt - 1])
 
 
 def delete(key: str) -> None:
